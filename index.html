@@ -1,0 +1,56 @@
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Psicolandia</title>
+    <link rel="stylesheet" href="psicolandia_game_animated.css" />
+  </head>
+  <body>
+    <div id="gw">
+      <div id="ui">
+        <div id="intro-screen" class="screen on">
+          <canvas id="gc-intro" class="panel-canvas" width="680" height="180"></canvas>
+          <h1>Psicolandia</h1>
+          <p>
+            Eres un estudiante de psicología que llega a una ciudad peculiar donde cada
+            comportamiento puede convertirse en un diagnóstico. Toma decisiones en 4 niveles y descubre
+            cómo el lenguaje construye la realidad.
+          </p>
+          <p class="intro-subtitle">Kenneth Gergen - Construccionismo social</p>
+          <button id="start-btn" type="button">Entrar a Psicolandia</button>
+        </div>
+
+        <div id="game-screen" class="screen">
+          <canvas id="gc" height="220"></canvas>
+          <div id="hud">
+            <span class="hud-lv" id="lv-label">Nivel 1</span>
+            <div class="hud-bar"><div class="hud-fill" id="prog" style="width: 0%"></div></div>
+            <span class="hud-pts" id="pts">0 pts</span>
+          </div>
+          <div id="dlg">
+            <div id="dlg-char">NARRADOR</div>
+            <div id="dlg-txt">Bienvenido...</div>
+          </div>
+          <div id="choices"></div>
+          <div id="fb">
+            <div class="fb-tag" id="fb-tag">Perspectiva de Gergen</div>
+            <p id="fb-p"></p>
+          </div>
+          <button id="nxt" type="button">Continuar -&gt;</button>
+        </div>
+
+        <div id="end-screen" class="screen">
+          <canvas id="gc-end" class="panel-canvas" width="680" height="120"></canvas>
+          <h2>¡Misión completada!</h2>
+          <div class="end-score" id="end-pts">0 pts</div>
+          <div class="end-msg" id="end-msg"></div>
+          <button id="play-again" type="button">Jugar de nuevo</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="psicolandia_game_animated.js" defer></script>
+  </body>
+</html>
