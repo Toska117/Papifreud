@@ -1,0 +1,1315 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>EL DISCURSO DEL DÉFICIT: RPG CRÍTICO DE KENNETH GERGEN</title>
+  <style>
+    :root{
+      --bg:#111827;
+      --panel:#0f172a;
+      --panel2:#1e293b;
+      --line:#94a3b8;
+      --text:#f8fafc;
+      --accent:#facc15;
+      --grass:#3f9b0b;
+      --path:#c8b07a;
+      --water:#3b82f6;
+      --brick:#a16207;
+      --roof:#b91c1c;
+      --hp:#22c55e;
+      --warn:#ef4444;
+      --shadow:rgba(0,0,0,.25);
+      --ui:#e2e8f0;
+    }
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+    html,body{margin:0;background:#020617;color:var(--text);font-family:monospace;overflow:hidden;height:100%}
+    #wrap{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;position:relative;background:linear-gradient(#020617,#0f172a)}
+    canvas{image-rendering:pixelated;image-rendering:crisp-edges;border:3px solid #cbd5e1;background:#000;box-shadow:0 16px 50px rgba(0,0,0,.55);max-width:100vw;max-height:100vh}
+    #touchUI{position:fixed;inset:auto 10px 10px 10px;display:flex;justify-content:space-between;pointer-events:none;z-index:5}
+    .pad,.actions{pointer-events:auto;display:grid;gap:6px}
+    .pad{grid-template-columns:56px 56px 56px;grid-template-rows:56px 56px 56px;align-items:center;justify-items:center}
+    .actions{grid-template-columns:70px 70px;align-content:end}
+    .btn{width:56px;height:56px;border:none;border-radius:14px;background:rgba(15,23,42,.86);color:white;font-weight:700;font-size:20px;box-shadow:0 4px 0 rgba(0,0,0,.35);backdrop-filter:blur(4px)}
+    .btn.big{width:70px;height:70px;border-radius:50%;font-size:22px}
+    .btn:active{transform:translateY(2px);box-shadow:0 2px 0 rgba(0,0,0,.35)}
+    .ghost{visibility:hidden}
+    #help{position:fixed;top:8px;left:50%;transform:translateX(-50%);background:rgba(15,23,42,.8);border:1px solid rgba(255,255,255,.18);padding:8px 12px;border-radius:999px;font-size:12px;z-index:4}
+    @media (min-width: 1024px){
+      #touchUI{opacity:.85}
+    }
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="960" height="540" aria-label="Juego RPG de Kenneth Gergen"></canvas>
+</div>
+<div id="help">Mover: flechas/WASD · Aceptar: Enter/Z · Menú: X/M · En celular usa botones táctiles</div>
+<div id="touchUI">
+  <div class="pad">
+    <button class="btn ghost"></button>
+    <button class="btn" data-key="ArrowUp">↑</button>
+    <button class="btn ghost"></button>
+    <button class="btn" data-key="ArrowLeft">←</button>
+    <button class="btn ghost"></button>
+    <button class="btn" data-key="ArrowRight">→</button>
+    <button class="btn ghost"></button>
+    <button class="btn" data-key="ArrowDown">↓</button>
+    <button class="btn ghost"></button>
+  </div>
+  <div class="actions">
+    <button class="btn big" data-key="KeyZ">A</button>
+    <button class="btn big" data-key="KeyX">B</button>
+  </div>
+</div>
+<script>
+(() => {
+  'use strict';
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+
+  const W = canvas.width;
+  const H = canvas.height;
+  const TILE = 32;
+  const WORLD_W = 72;
+  const WORLD_H = 24;
+
+  const STATE = {
+    INTRO:'INTRO',
+    EXPLORACION:'EXPLORACION',
+    DIALOGO:'DIALOGO',
+    BATALLA:'BATALLA',
+    INTERIOR:'INTERIOR',
+    MENU:'MENU',
+    TRANSICION:'TRANSICION',
+    FINAL:'FINAL'
+  };
+
+  const game = {
+    state: STATE.INTRO,
+    prevState: STATE.EXPLORACION,
+    time: 0,
+    flash: 0,
+    shake: 0,
+    message: '',
+    messageTimer: 0,
+    transition: 0,
+  };
+
+  const input = {
+    held: new Set(),
+    pressed: new Set(),
+    consume(code){ const has=this.pressed.has(code); if(has) this.pressed.delete(code); return has; },
+    isDown(code){ return this.held.has(code); },
+    clearPressed(){ this.pressed.clear(); }
+  };
+
+  const saveKey = 'rpg_gergen_ultra_pro_v1';
+
+  const academy = {
+    bio: [
+      'Soy Kenneth J. Gergen. Nací el 9 de diciembre de 1934 en Rochester, Nueva York.',
+      'Estudié psicología en Yale y obtuve el doctorado en Duke.',
+      'Fui profesor en Swarthmore College, también enseñé en Harvard y en espacios internacionales.',
+      'Mis aportes giran alrededor del construccionismo social: cuestionar la idea de una verdad psicológica fija y neutral.',
+      'Obras clave: The Saturated Self, Relational Being y el capítulo “Las consecuencias culturales del discurso del déficit”.'
+    ],
+    context: [
+      'Mi pensamiento se desarrolla en la segunda mitad del siglo XX.',
+      'En esa época crecieron las luchas por los derechos civiles, la segunda ola del feminismo y las críticas a las desigualdades naturalizadas.',
+      'Tras el fin de la Guerra Fría y el auge del pensamiento posmoderno, muchas grandes narrativas comenzaron a ser cuestionadas.',
+      'La psicología social tradicional entró en crisis al pretender ser universal, ahistórica y neutral.',
+      'Por eso el construccionismo social propone mirar el lenguaje, el poder y el contexto relacional en la producción de verdad.'
+    ],
+    review: [
+      'En “Las consecuencias culturales del discurso del déficit”, Gergen critica la expansión de etiquetas y diagnósticos usados para nombrar supuestas fallas individuales.',
+      'La crítica central: el lenguaje psicológico no solo describe; también construye realidades sociales.',
+      'A eso se conecta la falacia de la concreción mal situada: tomar una categoría producida por el lenguaje como si fuera una cosa objetiva y natural.',
+      'Entre sus consecuencias culturales están la jerarquía social, la erosión de la comunidad y el autodebilitamiento.',
+      'Gergen no niega que el lenguaje clínico pueda visibilizar sufrimiento; cuestiona su uso acrítico cuando individualiza problemas sociales y estructurales.',
+      'La alternativa no es dejar de escuchar el dolor, sino abrir respuestas relacionales, comunitarias y menos patologizantes.'
+    ]
+  };
+
+  const player = {
+    x: 3 * TILE,
+    y: 11 * TILE,
+    w: 22,
+    h: 28,
+    dir: 'down',
+    speedBase: 115,
+    speedBonus: 0,
+    anim: 0,
+    moving: false,
+    medals: 0,
+    inventory: ['Cuaderno crítico'],
+    gymCleared: [false,false,false],
+    read: { bio:false, context:false, review:false },
+    finalChoice: null,
+  };
+
+  const camera = { x:0, y:0, w:W, h:H };
+
+  const world = {
+    width: WORLD_W * TILE,
+    height: WORLD_H * TILE,
+    collisionRects: [],
+    interactives: [],
+    npcs: [],
+    interiors: {},
+    gates: []
+  };
+
+  const dialog = {
+    pages: [],
+    index: 0,
+    speaker: '',
+    onDone: null,
+  };
+
+  const menu = {
+    index: 0,
+    tabs: ['Resumen','Medallas','Inventario','Ayuda','Reiniciar'],
+  };
+
+  const battle = {
+    trainer: null,
+    questions: [],
+    qIndex: 0,
+    selected: 0,
+    playerHP: 100,
+    enemyHP: 100,
+    feedback: '',
+    ended: false,
+    victory: false,
+  };
+
+  const progressLabels = [
+    'Inicio',
+    'Gimnasio 1: Contexto',
+    'Gimnasio 2: Relacional',
+    'Gimnasio 3: Comunidad',
+    'Casa de Kibby'
+  ];
+
+  function addRect(x,y,w,h){ world.collisionRects.push({x,y,w,h}); }
+  function addInteractive(obj){ world.interactives.push(obj); }
+  function addNPC(obj){ world.npcs.push(obj); }
+  function addGate(obj){ world.gates.push(obj); }
+
+  function randi(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
+  function clamp(v,min,max){ return Math.max(min,Math.min(max,v)); }
+  function overlap(a,b){ return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y; }
+
+  function worldBuild(){
+    world.collisionRects.length = 0;
+    world.interactives.length = 0;
+    world.npcs.length = 0;
+    world.gates.length = 0;
+
+    // bordes
+    addRect(-100,-100,world.width+200,100);
+    addRect(-100,world.height,world.width+200,100);
+    addRect(-100,0,100,world.height);
+    addRect(world.width,0,100,world.height);
+
+    // edificios exteriores
+    const houses = [
+      {x:4,y:5,w:4,h:3,type:'home',name:'Casa común'},
+      {x:10,y:4,w:5,h:4,type:'care',name:'Centro de cuidado'},
+      {x:18,y:4,w:6,h:4,type:'library',name:'Biblioteca crítica'},
+      {x:28,y:5,w:4,h:3,type:'community',name:'Casa comunal'},
+      {x:55,y:4,w:6,h:5,type:'gym1',name:'Gimnasio Contexto'},
+      {x:58,y:13,w:6,h:5,type:'gym2',name:'Gimnasio Relacional'},
+      {x:43,y:13,w:6,h:5,type:'gym3',name:'Gimnasio Comunidad'},
+      {x:66,y:8,w:5,h:5,type:'kibby',name:'Casa de Kibby'}
+    ];
+
+    houses.forEach(h=>{
+      const px=h.x*TILE, py=h.y*TILE, pw=h.w*TILE, ph=h.h*TILE;
+      addRect(px,py,pw,ph);
+      addInteractive({
+        x:px + pw/2 - 20, y:py+ph, w:40, h:10,
+        kind:'door', target:h.type, name:h.name
+      });
+    });
+
+    // cercas y obstáculos urbanos
+    for(let i=14;i<38;i++) addRect(i*TILE, 9*TILE, TILE, TILE/2);
+    for(let i=40;i<53;i++) addRect(i*TILE, 11*TILE, TILE, TILE/2);
+    addRect(34*TILE, 4*TILE, TILE*2, TILE*4);
+    addRect(35*TILE, 15*TILE, TILE*2, TILE*4);
+
+    // puertas de progreso
+    addGate({x:52*TILE, y:10*TILE, w:TILE*2, h:TILE*4, needs:1, label:'Se requiere Medalla de Contexto'});
+    addGate({x:50*TILE, y:13*TILE, w:TILE*2, h:TILE*4, needs:2, label:'Se requiere Medalla Relacional'});
+    addGate({x:64*TILE, y:9*TILE,  w:TILE*2, h:TILE*4, needs:3, label:'Se requiere Medalla de Comunidad'});
+
+    // personajes y señales
+    addNPC({x:6*TILE,y:12*TILE,w:20,h:24,name:'Kenneth Gergen',color:'#facc15',talk:[...academy.bio],type:'mentor-start'});
+    addNPC({x:20*TILE,y:10*TILE,w:18,h:22,name:'Archivista',color:'#93c5fd',talk:[...academy.review],type:'review'});
+    addNPC({x:30*TILE,y:11*TILE,w:18,h:22,name:'Historiadora',color:'#fca5a5',talk:[...academy.context],type:'context'});
+    addNPC({x:56*TILE,y:10*TILE,w:18,h:22,name:'Entrenadora Contexto A',color:'#22c55e',battleKey:'g1a'});
+    addNPC({x:60*TILE,y:10*TILE,w:18,h:22,name:'Entrenador Contexto B',color:'#84cc16',battleKey:'g1b'});
+    addNPC({x:58*TILE,y:7*TILE,w:20,h:24,name:'Líder Contexto',color:'#eab308',battleKey:'g1boss'});
+    addNPC({x:60*TILE,y:18*TILE,w:18,h:22,name:'Entrenadora Relacional A',color:'#06b6d4',battleKey:'g2a'});
+    addNPC({x:62*TILE,y:15*TILE,w:18,h:22,name:'Entrenador Relacional B',color:'#0284c7',battleKey:'g2b'});
+    addNPC({x:60*TILE,y:14*TILE,w:20,h:24,name:'Líder Relacional',color:'#38bdf8',battleKey:'g2boss'});
+    addNPC({x:44*TILE,y:18*TILE,w:18,h:22,name:'Entrenadora Comunidad A',color:'#f97316',battleKey:'g3a'});
+    addNPC({x:47*TILE,y:18*TILE,w:18,h:22,name:'Entrenador Comunidad B',color:'#fb7185',battleKey:'g3b'});
+    addNPC({x:45*TILE,y:14*TILE,w:20,h:24,name:'Líder Comunidad',color:'#f43f5e',battleKey:'g3boss'});
+
+    addInteractive({x:8*TILE, y:13*TILE, w:24, h:18, kind:'sign', text:['Bienvenida/o a la Ciudad Crítica.','Avanza en orden: Contexto → Relacional → Comunidad → Kibby.']});
+    addInteractive({x:24*TILE, y:12*TILE, w:24, h:18, kind:'sign', text:['Biblioteca crítica: aquí encontrarás la reseña jugable del capítulo.']});
+    addInteractive({x:54*TILE, y:15*TILE, w:24, h:18, kind:'sign', text:['Ruta bloqueada. Solo se abre al ganar cada medalla.']});
+
+    buildInteriors();
+  }
+
+  function buildInteriors(){
+    world.interiors = {
+      home: {name:'Casa común', w:14, h:10, exit:{x:7,y:9}, furn:[
+        {kind:'bed',x:1,y:1},{kind:'table',x:8,y:2},{kind:'chair',x:8,y:3},{kind:'plant',x:12,y:1},{kind:'shelf',x:3,y:1}
+      ], talk:['Una casa con vida cotidiana, no una pantalla vacía.']},
+      care: {name:'Centro de cuidado', w:16, h:10, exit:{x:8,y:9}, furn:[
+        {kind:'desk',x:2,y:1},{kind:'bed',x:10,y:1},{kind:'bed',x:12,y:1},{kind:'plant',x:14,y:1},{kind:'shelf',x:1,y:4}
+      ], talk:['Cuidar no siempre es etiquetar. A veces escuchar y acompañar abre más caminos que nombrar un déficit.']},
+      library: {name:'Biblioteca crítica', w:18, h:11, exit:{x:9,y:10}, furn:[
+        {kind:'shelf',x:1,y:1},{kind:'shelf',x:3,y:1},{kind:'shelf',x:5,y:1},{kind:'shelf',x:7,y:1},
+        {kind:'table',x:11,y:3},{kind:'chair',x:11,y:4},{kind:'chair',x:12,y:4},{kind:'plant',x:16,y:1}
+      ], talk:[...academy.review]},
+      community: {name:'Casa comunal', w:16, h:11, exit:{x:8,y:10}, furn:[
+        {kind:'table',x:5,y:3},{kind:'chair',x:4,y:4},{kind:'chair',x:6,y:4},{kind:'chair',x:8,y:4},{kind:'plant',x:13,y:1},{kind:'shelf',x:1,y:1}
+      ], talk:['La comunidad pierde fuerza cuando todos los problemas son trasladados a expertos y categorías aisladas.']},
+      gym1: {name:'Gimnasio Contexto', w:18, h:12, exit:{x:9,y:11}, gym:1, npcs:[
+        {x:5*TILE,y:8*TILE,w:18,h:22,name:'Entrenadora Contexto A',color:'#22c55e',battleKey:'g1a'},
+        {x:12*TILE,y:8*TILE,w:18,h:22,name:'Entrenador Contexto B',color:'#84cc16',battleKey:'g1b'},
+        {x:8.5*TILE,y:3*TILE,w:20,h:24,name:'Líder Contexto',color:'#eab308',battleKey:'g1boss'}
+      ]},
+      gym2: {name:'Gimnasio Relacional', w:18, h:12, exit:{x:9,y:11}, gym:2, npcs:[
+        {x:5*TILE,y:8*TILE,w:18,h:22,name:'Entrenadora Relacional A',color:'#06b6d4',battleKey:'g2a'},
+        {x:12*TILE,y:8*TILE,w:18,h:22,name:'Entrenador Relacional B',color:'#0284c7',battleKey:'g2b'},
+        {x:8.5*TILE,y:3*TILE,w:20,h:24,name:'Líder Relacional',color:'#38bdf8',battleKey:'g2boss'}
+      ]},
+      gym3: {name:'Gimnasio Comunidad', w:18, h:12, exit:{x:9,y:11}, gym:3, npcs:[
+        {x:5*TILE,y:8*TILE,w:18,h:22,name:'Entrenadora Comunidad A',color:'#f97316',battleKey:'g3a'},
+        {x:12*TILE,y:8*TILE,w:18,h:22,name:'Entrenador Comunidad B',color:'#fb7185',battleKey:'g3b'},
+        {x:8.5*TILE,y:3*TILE,w:20,h:24,name:'Líder Comunidad',color:'#f43f5e',battleKey:'g3boss'}
+      ]},
+      kibby: {name:'Casa de Kibby', w:16, h:10, exit:{x:8,y:9}, final:true, npcs:[
+        {x:7*TILE,y:3.5*TILE,w:28,h:30,name:'Kibby',color:'#a78bfa',battleKey:'finalKibby',finalNPC:true}
+      ]}
+    };
+  }
+
+  const battleBank = {
+    g1a: makeBattle('Entrenadora Contexto A', 'Déficitín', [
+      q('¿En qué ciudad nació Kenneth J. Gergen?', ['Rochester, Nueva York','Boston','Chicago','Austin'], 0, 'Dato biográfico base.'),
+      q('¿Qué estudios realizó Gergen?', ['Medicina en Columbia','Psicología en Yale y doctorado en Duke','Sociología en Princeton','Psicoanálisis en Viena'], 1, 'Su formación ancla su trayectoria académica.'),
+      q('¿Qué crítica general hace Gergen a la psicología moderna?', ['Que es demasiado artística','Que pretende describir verdades universales y neutrales','Que no usa números','Que ignora la biología por completo'], 1, 'La crítica va contra el universalismo ahistórico.')
+    ]),
+    g1b: makeBattle('Entrenador Contexto B', 'Etiquetador', [
+      q('¿Qué procesos marcaron la segunda mitad del siglo XX?', ['Solo expansión del marketing','Derechos civiles, feminismo y crítica social','Solo la carrera espacial','Solo avances farmacológicos'], 1, 'Ese contexto ayudó a cuestionar lo dado como natural.'),
+      q('¿Qué ocurrió con muchas grandes narrativas tras fines del siglo XX?', ['Se fortalecieron sin discusión','Entraron en crisis y fueron cuestionadas','Desapareció la política','Se volvieron puramente científicas'], 1, 'Aquí entra la sensibilidad posmoderna.'),
+      q('¿Cómo surge el construccionismo social en esta historia?', ['Como defensa de verdades fijas','Como respuesta crítica a la psicología tradicional','Como método solo estadístico','Como rechazo a toda relación social'], 1, 'Se opone a la idea de conocimiento neutral y fijo.')
+    ]),
+    g1boss: makeBattle('Líder Contexto', 'DSMon', [
+      q('¿Qué critica Gergen cuando se aísla al individuo del contexto?', ['Que aprende demasiado','Que se individualizan problemas sociales y culturales','Que no hay emociones','Que desaparece la memoria'], 1, 'Se borra el peso de relaciones, instituciones y cultura.'),
+      q('¿Cuál medalla representa este aprendizaje?', ['Medalla de Archivo','Medalla de Contexto','Medalla de Diagnóstico','Medalla de Neutro'], 1, 'Primera insignia del recorrido.'),
+      q('¿Qué propone una mirada crítica inicial?', ['Buscar la falla interna primero','Escuchar el contexto relacional e histórico','Etiquetar rápido','Normalizar sin preguntar'], 1, 'La comprensión empieza situando el problema.')
+    ]),
+    g2a: makeBattle('Entrenadora Relacional A', 'Jerarquion', [
+      q('¿Qué sostiene la visión pragmática/relacional del lenguaje?', ['Que el lenguaje solo refleja hechos internos','Que el lenguaje también construye realidad social','Que las palabras no importan','Que todo significado es biológico'], 1, 'En Gergen, hablar es actuar socialmente.'),
+      q('¿Qué es la falacia de la concreción mal situada?', ['Un error matemático','Tomar una categoría lingüística como una cosa natural y objetiva','Una terapia breve','Un método etnográfico'], 1, 'Concepto clave del capítulo.'),
+      q('¿Qué riesgo hay en convertir un diagnóstico en esencia?', ['Facilita la escucha comunitaria','Puede fijar identidades y relaciones jerárquicas','Elimina estigma','Fortalece la participación social'], 1, 'La etiqueta puede volverse destino.')
+    ]),
+    g2b: makeBattle('Entrenador Relacional B', 'Estigma', [
+      q('¿Cuál NO corresponde a una consecuencia cultural del discurso del déficit?', ['Jerarquía social','Erosión de la comunidad','Autodebilitamiento','Aumento automático de la solidaridad'], 3, 'Las otras tres sí aparecen como consecuencias centrales.'),
+      q('¿Qué pasa cuando expertos monopolizan la definición de los problemas?', ['La comunidad gana agencia','Se erosiona la capacidad comunitaria de respuesta','Aumenta la horizontalidad','Desaparecen las jerarquías'], 1, 'Gergen critica la delegación exclusiva a expertos.'),
+      q('¿Qué cuestiona el construccionismo social sobre la naturaleza humana?', ['Que sea totalmente histórica y relacional','Que exista una esencia fija e independiente del contexto','Que no exista cuerpo','Que no haya conflictos'], 1, 'Niega una esencia psicológica estable y ahistórica.')
+    ]),
+    g2boss: makeBattle('Líder Relacional', 'Diagnostix', [
+      q('¿Por qué el lenguaje clínico no es neutral en este capítulo?', ['Porque siempre es falso','Porque organiza relaciones de poder y clasificación','Porque no tiene gramática','Porque reemplaza toda experiencia'], 1, 'No es neutral porque produce efectos sociales.'),
+      q('¿Cuál es el matiz crítico correcto?', ['Todo diagnóstico debe prohibirse','El diagnóstico puede visibilizar sufrimiento, pero su uso acrítico individualiza problemas','El sufrimiento no existe','Todo problema es imaginación'], 1, 'Matiz importante para una lectura seria.'),
+      q('¿Qué desbloquea esta victoria?', ['Solo una frase bonita','La Medalla Relacional y la siguiente ruta','El final inmediato','La desaparición del mapa'], 1, 'La progresión debe quedar clara.')
+    ]),
+    g3a: makeBattle('Entrenadora Comunidad A', 'AutoDebilita', [
+      q('¿Qué es el autodebilitamiento?', ['Hacer ejercicio intenso','Asumir la etiqueta como defecto personal fijo','Participar más en comunidad','Crear redes de apoyo'], 1, 'El sujeto puede verse a sí mismo desde el déficit.'),
+      q('¿Qué ocurre con la comunidad bajo el discurso del déficit?', ['Se fortalece por defecto','Se erosiona al delegar y aislar el sufrimiento','Se vuelve más horizontal','Se hace innecesaria'], 1, 'La comunidad pierde lugar como espacio de respuesta.'),
+      q('¿Qué critica Gergen en el ciclo de enfermización progresiva?', ['Que se agotan las palabras','Que el vocabulario de déficit se expande y coloniza más experiencias','Que desaparecen diagnósticos','Que la cultura deja de hablar'], 1, 'Cada vez más zonas de la vida son nombradas como falla.')
+    ]),
+    g3b: makeBattle('Entrenador Comunidad B', 'Normatrix', [
+      q('¿Qué riesgo hay al reducir experiencias complejas a etiquetas?', ['Se comprenden mejor todas las estructuras','Se simplifican y se invisibilizan relaciones sociales e históricas','Se resuelven de inmediato','Se elimina el poder'], 1, 'La complejidad queda atrapada en nombres fijos.'),
+      q('¿Cuál alternativa se sugiere en el capítulo?', ['Más jerarquía diagnóstica','Alternativas relacionales y comunitarias','Eliminar el diálogo','Ignorar el sufrimiento'], 1, 'El horizonte es comunitario, no negacionista.'),
+      q('¿Qué medalla representa este aprendizaje?', ['Medalla de Comunidad','Medalla de Archivo','Medalla del Silencio','Medalla Neutra'], 0, 'Última medalla antes de Kibby.')
+    ]),
+    g3boss: makeBattle('Líder Comunidad', 'CicloMax', [
+      q('¿Qué lectura resume mejor el capítulo?', ['Los problemas son solo internos','El problema no es solo el individuo, sino cómo la cultura lo nombra y separa','Todo diagnóstico es perfecto','La comunidad no influye en nada'], 1, 'Esa es la clave relacional del texto.'),
+      q('¿Qué debe hacer una psicología crítica aquí?', ['Etiquetar con más precisión','Abrir comprensión situada, relacional y comunitaria','Callar todo sufrimiento','Eliminar la historia'], 1, 'La crítica busca otras formas de respuesta.'),
+      q('¿Qué obtienes al vencer este gimnasio?', ['Solo experiencia visual','La Medalla de Comunidad y acceso a Kibby','Un reinicio total','La pérdida del inventario'], 1, 'Último desbloqueo del mapa exterior.')
+    ]),
+    finalKibby: makeBattle('Kibby', 'Kibby', [
+      q('Frente a Kibby, ¿cuál respuesta reproduce el discurso del déficit?', ['Escucharlo en relación con la comunidad','Nombrarlo como esencia extraña y separarlo','Preguntar por su historia','Reconocer efectos del lenguaje'], 1, 'Etiquetar y aislar conduce al final malo.'),
+      q('¿Cuál comprensión se alinea con Gergen?', ['Kibby es el problema en sí mismo','El problema también está en cómo la cultura lo nombra y aparta','La comunidad no importa','Solo el experto puede decidir'], 1, 'La clave está en la dimensión relacional.'),
+      q('¿Qué alternativa abre el final bueno?', ['Más aislamiento','Comunidad recuperada y escucha relacional','Silencio total','Patologización inmediata'], 1, 'Esa es la salida crítica del juego.')
+    ])
+  };
+
+  function q(text, options, correct, explanation){ return { text, options, correct, explanation }; }
+  function makeBattle(trainer, enemy, questions){ return { trainer, enemy, questions, defeated:false }; }
+
+  function shuffleArray(arr){
+    for(let i = arr.length - 1; i > 0; i--){
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  function shuffleQuestion(question){
+    const indexed = question.options.map((option, index) => ({ option, index }));
+    shuffleArray(indexed);
+    question.options = indexed.map(item => item.option);
+    question.correct = indexed.findIndex(item => item.index === question.correct);
+    return question;
+  }
+
+  function shuffleAllBattleQuestions(){
+    Object.values(battleBank).forEach(b => {
+      b.questions = b.questions.map(q => shuffleQuestion({ ...q, options:[...q.options] }));
+    });
+  }
+
+  function startDialog(speaker, pages, onDone=null){
+    game.prevState = game.state;
+    game.state = STATE.DIALOGO;
+    dialog.speaker = speaker;
+    dialog.pages = pages.slice();
+    dialog.index = 0;
+    dialog.onDone = onDone;
+  }
+
+  function advanceDialog(){
+    dialog.index++;
+    if(dialog.index >= dialog.pages.length){
+      const cb = dialog.onDone;
+      dialog.onDone = null;
+      game.state = game.prevState === STATE.MENU ? STATE.EXPLORACION : game.prevState;
+      if(cb) cb();
+    }
+  }
+
+  function showMessage(text, ms=2200){ game.message = text; game.messageTimer = ms; }
+
+  function startBattleByKey(key){
+    const src = battleBank[key];
+    if(!src || src.defeated) return;
+    game.prevState = game.state;
+    game.state = STATE.TRANSICION;
+    game.transition = 700;
+    setTimeout(() => {
+      battle.trainer = src.trainer;
+      battle.questions = src.questions.map(v=>({...v}));
+      battle.qIndex = 0;
+      battle.selected = 0;
+      battle.playerHP = 100;
+      battle.enemyHP = 100;
+      battle.feedback = '';
+      battle.ended = false;
+      battle.victory = false;
+      game.state = STATE.BATALLA;
+      game.shake = 10;
+    }, 180);
+  }
+
+  function resolveAnswer(index){
+    if(game.state !== STATE.BATALLA || battle.ended) return;
+    const q = battle.questions[battle.qIndex];
+    if(index === q.correct){
+      battle.enemyHP = clamp(battle.enemyHP - 34, 0, 100);
+      battle.feedback = '¡Correcto! ' + q.explanation;
+      game.shake = 8;
+      if(battle.qIndex === battle.questions.length - 1){
+        battle.victory = true;
+        battle.ended = true;
+        onBattleWin();
+      } else {
+        battle.qIndex++;
+      }
+    } else {
+      battle.playerHP = clamp(battle.playerHP - 42, 0, 100);
+      battle.feedback = 'Incorrecto. ' + q.explanation;
+      game.flash = 110;
+      game.shake = 12;
+      battle.ended = true;
+      battle.victory = false;
+      setTimeout(() => {
+        game.state = game.prevState;
+        showMessage('Perdiste el combate. Debes responder bien todas las preguntas para avanzar.');
+      }, 900);
+    }
+  }
+
+  function onBattleWin(){
+    const key = Object.keys(battleBank).find(k => battleBank[k].trainer === battle.trainer);
+    if(key) battleBank[key].defeated = true;
+
+    let msgs = ['¡Victoria! Has respondido bien todas las preguntas.'];
+    if(key === 'g1boss' && !player.gymCleared[0]){
+      player.gymCleared[0] = true; player.medals = Math.max(player.medals,1); player.speedBonus += 18;
+      msgs.push('¡Ganaste la Medalla de Contexto!');
+      msgs.push('¡Se desbloqueó el Gimnasio Relacional!');
+    }
+    if(key === 'g2boss' && !player.gymCleared[1]){
+      player.gymCleared[1] = true; player.medals = Math.max(player.medals,2); player.speedBonus += 18;
+      msgs.push('¡Ganaste la Medalla Relacional!');
+      msgs.push('¡Se desbloqueó el Gimnasio Comunidad!');
+    }
+    if(key === 'g3boss' && !player.gymCleared[2]){
+      player.gymCleared[2] = true; player.medals = Math.max(player.medals,3); player.speedBonus += 18;
+      msgs.push('¡Ganaste la Medalla de Comunidad!');
+      msgs.push('¡La ruta hacia Kibby ha sido desbloqueada!');
+    }
+    if(key === 'finalKibby'){
+      player.finalChoice = 'good';
+      msgs = ['Has vencido escuchando relacionalmente.', 'Victoria: comunidad recuperada.'];
+      setTimeout(()=>{ game.state = STATE.FINAL; }, 700);
+    } else {
+      setTimeout(()=>{
+        game.state = game.prevState;
+        startDialog(battle.trainer, msgs);
+      }, 700);
+    }
+  }
+
+  function currentSpeed(){ return player.speedBase + player.speedBonus; }
+
+  function saveGame(){
+    const data = {
+      player: JSON.parse(JSON.stringify(player)),
+      defeated: Object.fromEntries(Object.entries(battleBank).map(([k,v])=>[k,v.defeated]))
+    };
+    localStorage.setItem(saveKey, JSON.stringify(data));
+    showMessage('Partida guardada automáticamente.', 1100);
+  }
+
+  function loadGame(){
+    try {
+      const raw = localStorage.getItem(saveKey);
+      if(!raw) return;
+      const data = JSON.parse(raw);
+      Object.assign(player, data.player || {});
+      if(data.defeated){
+        Object.keys(data.defeated).forEach(k => { if(battleBank[k]) battleBank[k].defeated = !!data.defeated[k]; });
+      }
+    } catch(err){ console.error(err); }
+  }
+
+  function resetGame(){
+    localStorage.removeItem(saveKey);
+    location.reload();
+  }
+
+  let currentInterior = null;
+  let interiorPlayer = {x:8*TILE,y:8*TILE};
+  let returnPoint = {x:0,y:0};
+  const INTERIOR_OFFSET_X = 80;
+  const INTERIOR_OFFSET_Y = 70;
+
+  function enterInterior(key){
+    if(key==='gym2' && player.medals < 1){ showMessage('Necesitas la Medalla de Contexto.'); return; }
+    if(key==='gym3' && player.medals < 2){ showMessage('Necesitas la Medalla Relacional.'); return; }
+    if(key==='kibby' && player.medals < 3){ showMessage('Necesitas las 3 medallas para llegar a Kibby.'); return; }
+    currentInterior = world.interiors[key];
+    if(!currentInterior) return;
+    returnPoint = {x:player.x, y:player.y};
+    // puntos de aparición más centrados y lejos de NPCs
+    if(key === 'gym1' || key === 'gym2' || key === 'gym3'){
+      interiorPlayer = {x:8*TILE, y:6*TILE};
+    } else if(key === 'kibby'){
+      interiorPlayer = {x:7*TILE, y:6*TILE};
+    } else {
+      interiorPlayer = {x:currentInterior.exit.x*TILE, y:currentInterior.exit.y*TILE - 64};
+    }
+    game.state = STATE.INTERIOR;
+  }
+
+  function leaveInterior(){
+    currentInterior = null;
+    player.x = returnPoint.x; player.y = returnPoint.y + 20;
+    game.state = STATE.EXPLORACION;
+  }
+
+  function isPlayerAtInteriorExit(){
+    if(!currentInterior) return false;
+    const ex = currentInterior.exit.x * TILE;
+    const ey = currentInterior.exit.y * TILE;
+    const playerBox = {
+      x: interiorPlayer.x,
+      y: interiorPlayer.y,
+      w: player.w,
+      h: player.h
+    };
+    const exitBox = {
+      x: ex - 20,
+      y: ey - 10,
+      w: 60,
+      h: 40
+    };
+    return overlap(playerBox, exitBox) && player.dir === 'down';
+  }
+
+  function nearestFacingTarget(){
+    const box = game.state === STATE.INTERIOR
+      ? {x:INTERIOR_OFFSET_X + interiorPlayer.x, y:INTERIOR_OFFSET_Y + interiorPlayer.y, w:player.w, h:player.h}
+      : {x:player.x, y:player.y, w:player.w, h:player.h};
+    const facingDir = player.dir;
+    const f = 28;
+    let probe = {x:box.x, y:box.y, w:box.w, h:box.h};
+    if(facingDir==='up') probe.y -= f;
+    if(facingDir==='down') probe.y += f;
+    if(facingDir==='left') probe.x -= f;
+    if(facingDir==='right') probe.x += f;
+
+    if(game.state === STATE.INTERIOR && currentInterior?.npcs){
+      for(const n of currentInterior.npcs){
+        const nBox = {x:INTERIOR_OFFSET_X + n.x, y:INTERIOR_OFFSET_Y + n.y, w:n.w || 20, h:n.h || 24};
+        if(overlap(probe, nBox)) return {type:'npc', obj:n};
+      }
+    }
+
+    for(const n of world.npcs){
+      if(overlap(probe, n)) return {type:'npc', obj:n};
+    }
+    for(const i of world.interactives){
+      if(overlap(probe, i)) return {type:'interactive', obj:i};
+    }
+    return null;
+  }
+
+  function interact(){
+    if(game.state === STATE.INTRO){
+      startIntroSequence();
+      return;
+    }
+    if(game.state === STATE.DIALOGO){ advanceDialog(); return; }
+    if(game.state === STATE.FINAL){ resetGame(); return; }
+    if(game.state === STATE.MENU){ game.state = STATE.EXPLORACION; return; }
+    if(game.state !== STATE.EXPLORACION && game.state !== STATE.INTERIOR) return;
+
+    if(game.state === STATE.INTERIOR){
+      if(currentInterior){
+        if(isPlayerAtInteriorExit()){
+          leaveInterior();
+          return;
+        }
+
+        const target = nearestFacingTarget();
+        if(target && target.type === 'npc'){
+          const n = target.obj;
+          if(n.talk){
+            startDialog(n.name, n.talk);
+            return;
+          }
+          if(n.battleKey){
+            const key = n.battleKey;
+            if(battleBank[key].defeated){
+              startDialog(n.name, [n.finalNPC ? 'Ya comprendiste mi historia desde una mirada relacional.' : 'Ya me venciste. Sigue avanzando críticamente.']);
+              return;
+            }
+            if(key.startsWith('g2') && player.medals < 1){ showMessage('Primero debes ganar el Gimnasio Contexto.'); return; }
+            if(key.startsWith('g3') && player.medals < 2){ showMessage('Primero debes ganar el Gimnasio Relacional.'); return; }
+            if(key === 'finalKibby'){
+              startDialog(n.name, [
+                'Me llaman extraño, raro, inadecuado... pero antes del encierro todavía pertenecía al barrio.',
+                'La pregunta final no es qué soy en esencia, sino qué hace la cultura cuando me nombra y me aparta.'
+              ], () => startBattleByKey('finalKibby'));
+              return;
+            }
+            startDialog(n.name, ['Acepto el combate conceptual. Debes responder bien todas las preguntas para vencerme.'], () => startBattleByKey(key));
+            return;
+          }
+        }
+
+        if(currentInterior.talk){
+          startDialog(currentInterior.name, currentInterior.talk, () => {
+            if(currentInterior.name === 'Biblioteca crítica') player.read.review = true;
+          });
+          return;
+        }
+        if(currentInterior.gym){
+          showMessage('Acércate al líder o a los entrenadores y presiona Enter / A para luchar.');
+          return;
+        }
+      }
+      return;
+    }
+
+    const target = nearestFacingTarget();
+    if(!target){ showMessage('No hay nada con lo que interactuar aquí.', 900); return; }
+
+    if(target.type==='interactive'){
+      const i = target.obj;
+      if(i.kind==='door') return enterInterior(i.target);
+      if(i.kind==='sign') return startDialog('Señal', i.text);
+    }
+
+    if(target.type==='npc'){
+      const n = target.obj;
+      if(n.talk){
+        startDialog(n.name, n.talk, () => {
+          if(n.type==='mentor-start') player.read.bio = true;
+          if(n.type==='context') player.read.context = true;
+          if(n.type==='review') player.read.review = true;
+        });
+      } else if(n.battleKey){
+        const key = n.battleKey;
+        if(battleBank[key].defeated){ startDialog(n.name, ['Ya me venciste. Sigue avanzando críticamente.']); return; }
+        if(key.startsWith('g2') && player.medals < 1){ showMessage('Primero debes ganar el Gimnasio Contexto.'); return; }
+        if(key.startsWith('g3') && player.medals < 2){ showMessage('Primero debes ganar el Gimnasio Relacional.'); return; }
+        startDialog(n.name, ['Acepto el combate conceptual. Debes responder bien todas las preguntas para vencerme.'], () => startBattleByKey(key));
+      }
+    }
+  }
+
+  function startIntroSequence(){
+    game.state = STATE.EXPLORACION;
+    startDialog('Kenneth Gergen', [
+      'Bienvenida/o a “El Discurso del Déficit: RPG Crítico de Kenneth Gergen”.',
+      'Aquí no pelearás con fuerza física, sino con comprensión crítica, contexto y análisis relacional.',
+      'Tu misión: atravesar la ciudad, ganar tres gimnasios teóricos y llegar hasta Kibby sin reducirlo a una etiqueta.',
+      'Recuerda: el lenguaje no solo describe el mundo; también lo organiza y lo construye.'
+    ]);
+  }
+
+  function canMoveTo(nx, ny){
+    const box = {x:nx, y:ny, w:player.w, h:player.h};
+    for(const r of world.collisionRects){ if(overlap(box, r)) return false; }
+    for(const g of world.gates){ if(player.medals < g.needs && overlap(box,g)) return false; }
+    return true;
+  }
+
+  function movePlayer(dt){
+    if(game.state !== STATE.EXPLORACION) return;
+    let vx=0, vy=0;
+    if(input.isDown('ArrowUp') || input.isDown('KeyW')) { vy -= 1; player.dir='up'; }
+    if(input.isDown('ArrowDown') || input.isDown('KeyS')) { vy += 1; player.dir='down'; }
+    if(input.isDown('ArrowLeft') || input.isDown('KeyA')) { vx -= 1; player.dir='left'; }
+    if(input.isDown('ArrowRight') || input.isDown('KeyD')) { vx += 1; player.dir='right'; }
+    player.moving = !!(vx || vy);
+    if(!vx && !vy) return;
+    const len = Math.hypot(vx,vy) || 1;
+    vx/=len; vy/=len;
+    const sp = currentSpeed() * dt;
+    const nx = player.x + vx*sp;
+    const ny = player.y + vy*sp;
+    if(canMoveTo(nx, player.y)) player.x = nx;
+    if(canMoveTo(player.x, ny)) player.y = ny;
+    for(const g of world.gates){
+      if(player.medals < g.needs && overlap({x:player.x,y:player.y,w:player.w,h:player.h}, g)){
+        showMessage(g.label, 900);
+      }
+    }
+  }
+
+  function moveInterior(dt){
+    if(game.state !== STATE.INTERIOR) return;
+    let vx=0, vy=0;
+    if(input.isDown('ArrowUp') || input.isDown('KeyW')) { vy -= 1; player.dir='up'; }
+    if(input.isDown('ArrowDown') || input.isDown('KeyS')) { vy += 1; player.dir='down'; }
+    if(input.isDown('ArrowLeft') || input.isDown('KeyA')) { vx -= 1; player.dir='left'; }
+    if(input.isDown('ArrowRight') || input.isDown('KeyD')) { vx += 1; player.dir='right'; }
+    if(!vx && !vy) return;
+    const len = Math.hypot(vx,vy)||1; vx/=len; vy/=len;
+    const marginLeft = 28;
+    const marginTop = 28;
+    const marginRight = 28;
+    const marginBottom = 20;
+    const nextX = clamp(interiorPlayer.x + vx*120*dt, marginLeft, (currentInterior.w*TILE) - marginRight - player.w);
+    const nextY = clamp(interiorPlayer.y + vy*120*dt, marginTop, (currentInterior.h*TILE) - marginBottom - player.h);
+
+    const nextBox = {x:INTERIOR_OFFSET_X + nextX, y:INTERIOR_OFFSET_Y + nextY, w:player.w, h:player.h};
+    let blocked = false;
+    if(currentInterior?.npcs){
+      for(const n of currentInterior.npcs){
+        const nBox = {x:INTERIOR_OFFSET_X + n.x - 6, y:INTERIOR_OFFSET_Y + n.y - 6, w:(n.w || 20) + 12, h:(n.h || 24) + 12};
+        if(overlap(nextBox, nBox)){ blocked = true; break; }
+      }
+    }
+    if(!blocked){
+      interiorPlayer.x = nextX;
+      interiorPlayer.y = nextY;
+      if(isPlayerAtInteriorExit()){
+        leaveInterior();
+        return;
+      }
+
+    }
+  }
+
+  function update(dt){
+    game.time += dt;
+    if(game.flash > 0) game.flash -= dt*1000;
+    if(game.shake > 0) game.shake = Math.max(0, game.shake - dt*24);
+    if(game.messageTimer > 0){ game.messageTimer -= dt*1000; if(game.messageTimer <= 0) game.message = ''; }
+    if(game.transition > 0){ game.transition -= dt*1000; }
+
+    movePlayer(dt);
+    moveInterior(dt);
+    player.anim += player.moving ? dt*9 : dt*3;
+
+    camera.x = clamp(player.x - W/2 + player.w/2, 0, world.width - W);
+    camera.y = clamp(player.y - H/2 + player.h/2, 0, world.height - H);
+
+    if(input.consume('Enter') || input.consume('Space') || input.consume('KeyZ')) interact();
+    if(input.consume('Escape') || input.consume('KeyX') || input.consume('KeyM')){
+      if(game.state === STATE.EXPLORACION){ game.prevState = game.state; game.state = STATE.MENU; }
+      else if(game.state === STATE.MENU){ game.state = STATE.EXPLORACION; }
+    }
+
+    if(game.state === STATE.BATALLA){
+      if(input.consume('ArrowUp')) battle.selected = (battle.selected + 3) % 4;
+      if(input.consume('ArrowDown')) battle.selected = (battle.selected + 1) % 4;
+      if(input.consume('ArrowLeft')) battle.selected = battle.selected % 2 === 0 ? battle.selected + 1 : battle.selected - 1;
+      if(input.consume('ArrowRight')) battle.selected = battle.selected % 2 === 0 ? battle.selected + 1 : battle.selected - 1;
+      if((input.consume('Enter') || input.consume('Space') || input.consume('KeyZ')) && !battle.ended){ resolveAnswer(battle.selected); }
+      if(input.consume('Digit1')) resolveAnswer(0);
+      if(input.consume('Digit2')) resolveAnswer(1);
+      if(input.consume('Digit3')) resolveAnswer(2);
+      if(input.consume('Digit4')) resolveAnswer(3);
+    }
+
+    if(game.state === STATE.MENU){
+      if(input.consume('ArrowUp')) menu.index = (menu.index + menu.tabs.length - 1) % menu.tabs.length;
+      if(input.consume('ArrowDown')) menu.index = (menu.index + 1) % menu.tabs.length;
+      if((input.consume('Enter') || input.consume('Space') || input.consume('KeyZ')) && menu.tabs[menu.index] === 'Reiniciar'){
+        resetGame();
+        return;
+      }
+    }
+
+    input.clearPressed();
+  }
+
+  function drawPixelCharacter(x,y,main='#fde047',dir='down',frame=0,scale=1){
+    const bob = Math.floor(frame)%2;
+    ctx.save();
+    ctx.translate(Math.floor(x),Math.floor(y));
+    ctx.scale(scale,scale);
+    // sombra
+    ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(4,26,16,4);
+    // cabeza
+    ctx.fillStyle = '#f4c29b'; ctx.fillRect(7,2,10,9);
+    // pelo
+    ctx.fillStyle = '#3f2b1d'; ctx.fillRect(6,1,12,4);
+    // torso
+    ctx.fillStyle = main; ctx.fillRect(6,11,12,9);
+    // mochila
+    ctx.fillStyle = '#334155'; if(dir==='up') ctx.fillRect(6,11,12,9);
+    // brazos
+    ctx.fillStyle = '#f4c29b'; ctx.fillRect(4,12,2,8); ctx.fillRect(18,12,2,8);
+    // piernas
+    ctx.fillStyle = '#1e293b'; ctx.fillRect(7,20,4,7+bob); ctx.fillRect(13,20,4,7+(1-bob));
+    // ojos
+    if(dir !== 'up'){ ctx.fillStyle='#111'; ctx.fillRect(9,6,1,1); ctx.fillRect(14,6,1,1); }
+    ctx.restore();
+  }
+
+  function drawNPC(n){ drawPixelCharacter(n.x-camera.x, n.y-camera.y, n.color, 'down', game.time*8, 0.85); }
+
+  function drawWorld(){
+    // suelo
+    ctx.fillStyle = '#5b8e1d'; ctx.fillRect(0,0,W,H);
+    for(let y=0;y<W/TILE+2;y++){}
+    // patrón césped
+    for(let y=0;y<Math.ceil(H/TILE)+1;y++){
+      for(let x=0;x<Math.ceil(W/TILE)+1;x++){
+        const px=x*TILE - (camera.x%TILE), py=y*TILE - (camera.y%TILE);
+        ctx.fillStyle = (x+y)%2===0 ? '#4d8a16' : '#5b981c';
+        ctx.fillRect(px,py,TILE,TILE);
+        ctx.fillStyle = 'rgba(255,255,255,.05)';
+        ctx.fillRect(px+4,py+6,2,2); ctx.fillRect(px+18,py+22,2,2);
+      }
+    }
+
+    // caminos principales
+    drawPathRect(0,10*TILE,world.width,3*TILE);
+    drawPathRect(53*TILE,8*TILE,3*TILE,8*TILE);
+    drawPathRect(49*TILE,13*TILE,3*TILE,6*TILE);
+    drawPathRect(64*TILE,9*TILE,3*TILE,5*TILE);
+    drawPathRect(6*TILE,8*TILE,2*TILE,5*TILE);
+    drawPathRect(12*TILE,8*TILE,2*TILE,5*TILE);
+    drawPathRect(20*TILE,8*TILE,2*TILE,5*TILE);
+    drawPathRect(30*TILE,8*TILE,2*TILE,5*TILE);
+
+    // agua decorativa
+    drawWater(38*TILE,4*TILE,8*TILE,4*TILE);
+    drawWater(37*TILE,16*TILE,7*TILE,4*TILE);
+
+    // vegetación
+    for(let i=0;i<24;i++) drawTree((2+i*3)*TILE, 2*TILE + (i%2)*TILE);
+    for(let i=0;i<16;i++) drawTree((6+i*4)*TILE, 20*TILE + (i%2)*TILE);
+
+    // edificios exteriores
+    drawBuilding(4,5,4,3,'#d97706','#7c2d12','CASA');
+    drawBuilding(10,4,5,4,'#f59e0b','#991b1b','CUIDADO');
+    drawBuilding(18,4,6,4,'#60a5fa','#1d4ed8','BIBLIO');
+    drawBuilding(28,5,4,3,'#34d399','#065f46','COMUNAL');
+    drawGym(55,4,6,5,'#facc15','CTX');
+    drawGym(58,13,6,5,'#38bdf8','REL');
+    drawGym(43,13,6,5,'#fb7185','COM');
+    drawBuilding(66,8,5,5,'#a78bfa','#5b21b6','KIBBY');
+
+    // faroles / señales
+    for(let x=3;x<70;x+=6) drawLamp(x*TILE, 9*TILE);
+    drawSign(8*TILE,13*TILE); drawSign(24*TILE,12*TILE); drawSign(54*TILE,15*TILE);
+
+    // NPCs
+    world.npcs.forEach(drawNPC);
+
+    // jugador
+    drawPixelCharacter(player.x-camera.x, player.y-camera.y, '#fde047', player.dir, player.anim, 1);
+  }
+
+  function drawPathRect(x,y,w,h){
+    const sx=x-camera.x, sy=y-camera.y;
+    ctx.fillStyle = '#c8b07a'; ctx.fillRect(sx,sy,w,h);
+    ctx.fillStyle = 'rgba(0,0,0,.08)';
+    for(let i=0;i<w;i+=16){ ctx.fillRect(sx+i,sy+8,8,4); }
+  }
+
+  function drawWater(x,y,w,h){
+    const sx=x-camera.x, sy=y-camera.y;
+    ctx.fillStyle='#3b82f6'; ctx.fillRect(sx,sy,w,h);
+    ctx.fillStyle='rgba(255,255,255,.15)';
+    for(let i=0;i<w;i+=20){ ctx.fillRect(sx+i, sy+6+(i%12), 10, 2); }
+  }
+
+  function drawTree(x,y){
+    const sx=x-camera.x, sy=y-camera.y;
+    ctx.fillStyle='#6b3f1d'; ctx.fillRect(sx+11,sy+20,10,12);
+    ctx.fillStyle='#15803d'; ctx.fillRect(sx+4,sy+6,24,18);
+    ctx.fillStyle='#166534'; ctx.fillRect(sx+8,sy+2,16,10);
+  }
+
+  function drawLamp(x,y){
+    const sx=x-camera.x, sy=y-camera.y;
+    ctx.fillStyle='#475569'; ctx.fillRect(sx+14,sy-20,4,20);
+    ctx.fillStyle='#fde68a'; ctx.fillRect(sx+10,sy-24,12,8);
+  }
+
+  function drawSign(x,y){
+    const sx=x-camera.x, sy=y-camera.y;
+    ctx.fillStyle='#6b4f2a'; ctx.fillRect(sx+10,sy,4,14);
+    ctx.fillStyle='#e2e8f0'; ctx.fillRect(sx,sy-10,24,12);
+  }
+
+  function drawBuilding(tx,ty,tw,th,body,roof,label){
+    const x=tx*TILE-camera.x,y=ty*TILE-camera.y,w=tw*TILE,h=th*TILE;
+    ctx.fillStyle=roof; ctx.fillRect(x-4,y-8,w+8,14);
+    ctx.fillStyle=body; ctx.fillRect(x,y,w,h);
+    ctx.fillStyle='#f8fafc';
+    for(let i=0;i<tw-1;i++){ ctx.fillRect(x+8+i*18,y+16,12,10); }
+    ctx.fillStyle='#78350f'; ctx.fillRect(x+w/2-12,y+h-18,24,18);
+    ctx.fillStyle='#0f172a'; ctx.fillRect(x+6,y+h-8,w-12,4);
+    ctx.fillStyle='#111827'; ctx.font='10px monospace'; ctx.fillText(label,x+8,y+h/2+2);
+  }
+
+  function drawGym(tx,ty,tw,th,color,label){
+    const x=tx*TILE-camera.x,y=ty*TILE-camera.y,w=tw*TILE,h=th*TILE;
+    ctx.fillStyle='#1e293b'; ctx.fillRect(x,y,w,h);
+    ctx.fillStyle=color; ctx.fillRect(x+6,y+6,w-12,18);
+    ctx.fillStyle='#94a3b8'; ctx.fillRect(x+12,y+30,w-24,h-36);
+    ctx.fillStyle='#7c3aed'; ctx.fillRect(x+w/2-14,y+h-20,28,18);
+    ctx.fillStyle='#0f172a'; ctx.font='bold 14px monospace'; ctx.fillText(label,x+w/2-12,y+20);
+  }
+
+  function drawInterior(){
+    ctx.fillStyle = '#d6c4a4'; ctx.fillRect(0,0,W,H);
+    // cuadriculado piso
+    for(let y=0;y<H;y+=TILE){ for(let x=0;x<W;x+=TILE){ ctx.strokeStyle='rgba(0,0,0,.05)'; ctx.strokeRect(x,y,TILE,TILE); } }
+    // paredes
+    ctx.fillStyle='#8b5e34'; ctx.fillRect(0,0,W,24); ctx.fillRect(0,H-24,W,24); ctx.fillRect(0,0,24,H); ctx.fillRect(W-24,0,24,H);
+    ctx.fillStyle='#f5deb3'; ctx.fillRect(24,24,W-48,H-48);
+
+    if(!currentInterior) return;
+    ctx.fillStyle='#111827'; ctx.font='bold 16px monospace'; ctx.fillText(currentInterior.name, 36, 46);
+
+    if(currentInterior.furn){
+      currentInterior.furn.forEach(f => drawFurniture(f));
+    }
+    if(currentInterior.gym){ drawGymInterior(currentInterior.gym); }
+    if(currentInterior.final){ drawKibbyInterior(); }
+    if(currentInterior.final && currentInterior.npcs){
+      currentInterior.npcs.forEach(n => {
+        const nx = INTERIOR_OFFSET_X + n.x;
+        const ny = INTERIOR_OFFSET_Y + n.y;
+        ctx.fillStyle='rgba(15,23,42,.18)';
+        ctx.beginPath();
+        ctx.ellipse(nx+16, ny+30, 20, 7, 0, 0, Math.PI*2);
+        ctx.fill();
+        drawPixelCharacter(nx, ny, n.color, 'down', game.time*8, 1.15);
+        ctx.fillStyle='#0f172a';
+        ctx.font='12px monospace';
+        ctx.fillText('Kibby', nx-2, ny-10);
+      });
+    }
+
+    // salida
+    const ex = INTERIOR_OFFSET_X + currentInterior.exit.x*TILE;
+    const ey = INTERIOR_OFFSET_Y + currentInterior.exit.y*TILE;
+    ctx.fillStyle='#7c2d12'; ctx.fillRect(ex-18, ey, 38, 16);
+    ctx.fillStyle='#f8fafc'; ctx.fillText('SALIDA', ex-18, ey-8);
+
+    // jugador dibujado dentro del área útil del interior
+    const px = INTERIOR_OFFSET_X + interiorPlayer.x;
+    const py = INTERIOR_OFFSET_Y + interiorPlayer.y;
+    drawPixelCharacter(px, py, '#fde047', player.dir, player.anim, 1);
+  }
+
+  function drawFurniture(f){
+    const x=f.x*TILE+60, y=f.y*TILE+60;
+    if(f.kind==='bed'){ ctx.fillStyle='#64748b'; ctx.fillRect(x,y,48,28); ctx.fillStyle='#e2e8f0'; ctx.fillRect(x+4,y+4,16,10); }
+    if(f.kind==='table'){ ctx.fillStyle='#92400e'; ctx.fillRect(x,y,52,24); }
+    if(f.kind==='chair'){ ctx.fillStyle='#a16207'; ctx.fillRect(x,y,18,18); }
+    if(f.kind==='desk'){ ctx.fillStyle='#78350f'; ctx.fillRect(x,y,60,26); }
+    if(f.kind==='plant'){ ctx.fillStyle='#166534'; ctx.fillRect(x+6,y,14,18); ctx.fillStyle='#92400e'; ctx.fillRect(x+10,y+18,6,10); }
+    if(f.kind==='shelf'){ ctx.fillStyle='#6b4f2a'; ctx.fillRect(x,y,28,58); ctx.fillStyle='#22c55e'; ctx.fillRect(x+4,y+6,20,4); ctx.fillStyle='#60a5fa'; ctx.fillRect(x+4,y+18,20,4); ctx.fillStyle='#f59e0b'; ctx.fillRect(x+4,y+30,20,4); }
+  }
+
+  function drawGymInterior(index){
+    ctx.fillStyle = index===1 ? '#fef3c7' : index===2 ? '#dbeafe' : '#ffe4e6';
+    ctx.fillRect(80,70,W-160,H-140);
+    ctx.strokeStyle='#0f172a'; ctx.lineWidth=4; ctx.strokeRect(80,70,W-160,H-140);
+    ctx.fillStyle='#0f172a'; ctx.fillText('Arena conceptual', 110, 98);
+    ctx.fillStyle='#334155'; ctx.fillRect(W/2-70, 130, 140, 10);
+    ctx.fillRect(W/2-70, H-150, 140, 10);
+    ctx.fillText('Acércate al líder o a entrenadores para iniciar combate.', 110, H-88);
+
+    if(currentInterior?.npcs){
+      currentInterior.npcs.forEach(n => {
+        const nx = INTERIOR_OFFSET_X + n.x;
+        const ny = INTERIOR_OFFSET_Y + n.y;
+        // plataforma para que se vean mejor tipo Pokémon
+        ctx.fillStyle='rgba(15,23,42,.18)';
+        ctx.beginPath();
+        ctx.ellipse(nx+14, ny+28, 18, 6, 0, 0, Math.PI*2);
+        ctx.fill();
+        drawPixelCharacter(nx, ny, n.color, 'down', game.time*8, n.finalNPC ? 1.1 : 0.95);
+
+        ctx.fillStyle='#0f172a';
+        ctx.font='11px monospace';
+        const label = n.name.length > 20 ? n.name.slice(0,20) + '…' : n.name;
+        ctx.fillText(label, nx-8, ny-8);
+      });
+    }
+  }
+
+  function drawKibbyInterior(){
+    ctx.fillStyle='#ddd6fe'; ctx.fillRect(100,90,W-200,H-180);
+    ctx.strokeStyle='#5b21b6'; ctx.lineWidth=5; ctx.strokeRect(100,90,W-200,H-180);
+    ctx.fillStyle='#111827'; ctx.font='bold 20px monospace'; ctx.fillText('Casa de Kibby', 120, 120);
+    ctx.font='13px monospace';
+    wrapText('Aquí se decide si lo etiquetas o si lo comprendes relacionalmente. Acércate a Kibby y presiona Enter / A.', 120, 150, W-260, 18, 3);
+  }
+
+  function drawHUD(){
+    // panel superior
+    ctx.fillStyle='rgba(15,23,42,.82)'; ctx.fillRect(8,8,320,90);
+    ctx.strokeStyle='rgba(255,255,255,.2)'; ctx.strokeRect(8,8,320,90);
+    ctx.fillStyle='#f8fafc'; ctx.font='13px monospace';
+    ctx.fillText('EL DISCURSO DEL DÉFICIT', 18, 26);
+    ctx.fillText('Medallas: ' + '★'.repeat(player.medals) + '☆'.repeat(3-player.medals), 18, 46);
+    ctx.fillText('Velocidad: ' + currentSpeed().toFixed(0), 18, 64);
+    ctx.fillText('Progreso: ' + progressLabels[player.medals], 18, 82);
+
+    // minimapa
+    const mx=W-180,my=8,mw=168,mh=90;
+    ctx.fillStyle='rgba(15,23,42,.82)'; ctx.fillRect(mx,my,mw,mh); ctx.strokeStyle='rgba(255,255,255,.2)'; ctx.strokeRect(mx,my,mw,mh);
+    ctx.fillStyle='#475569'; ctx.fillRect(mx+8,my+48,152,12);
+    ctx.fillStyle='#facc15'; ctx.fillRect(mx+8,my+48, clamp((player.x/world.width)*152, 4, 152), 12);
+    ctx.fillStyle='#e2e8f0'; ctx.font='12px monospace'; ctx.fillText('Minimapa secuencial', mx+12, my+20);
+    ['Inicio','G1','G2','G3','K'].forEach((t,i)=>{ ctx.fillText(t,mx+10+i*36,my+38); });
+    ctx.fillStyle='#111827'; ctx.fillRect(mx+8+clamp((player.x/world.width)*152, 0, 150), my+46, 8, 16);
+
+    if(game.message){
+      const w = Math.min(W-60, 640), h = 42;
+      ctx.fillStyle='rgba(0,0,0,.72)'; ctx.fillRect((W-w)/2, H-60, w, h);
+      ctx.strokeStyle='rgba(255,255,255,.18)'; ctx.strokeRect((W-w)/2,H-60,w,h);
+      ctx.fillStyle='#fff'; ctx.fillText(game.message, (W-w)/2+14, H-34);
+    }
+  }
+
+  function drawDialogBox(){
+    const boxY = H - 210;
+    const boxH = 178;
+    ctx.fillStyle='rgba(15,23,42,.96)'; ctx.fillRect(16, boxY, W-32, boxH);
+    ctx.strokeStyle='rgba(255,255,255,.24)'; ctx.lineWidth = 3; ctx.strokeRect(16, boxY, W-32, boxH);
+    ctx.fillStyle='#facc15'; ctx.font='bold 16px monospace'; ctx.fillText(dialog.speaker, 38, boxY + 28);
+    ctx.fillStyle='#fff'; ctx.font='14px monospace';
+    wrapText(dialog.pages[dialog.index] || '', 38, boxY + 58, W - 76, 20, 5);
+    ctx.fillStyle='#cbd5e1'; ctx.font='12px monospace'; ctx.fillText('Enter / A para continuar', W-250, boxY + boxH - 18);
+  }
+
+  function wrapText(text, x, y, maxWidth, lineHeight, maxLines = Infinity){
+    const words = String(text).split(' ');
+    let line = '';
+    let lines = 0;
+    for(let n=0; n<words.length; n++){
+      const test = line + words[n] + ' ';
+      const m = ctx.measureText(test).width;
+      if(m > maxWidth && n > 0){
+        ctx.fillText(line.trim(), x, y);
+        line = words[n] + ' ';
+        y += lineHeight;
+        lines++;
+        if(lines >= maxLines - 1 && n < words.length - 1){
+          let rest = line + words.slice(n+1).join(' ');
+          while(ctx.measureText(rest + '…').width > maxWidth && rest.length > 0){
+            rest = rest.slice(0, -1);
+          }
+          ctx.fillText((rest.trim() + '…'), x, y);
+          return;
+        }
+      } else {
+        line = test;
+      }
+    }
+    ctx.fillText(line.trim(), x, y);
+  }
+
+  function drawMenu(){
+    ctx.fillStyle='rgba(2,6,23,.95)'; ctx.fillRect(90,50,W-180,H-100);
+    ctx.strokeStyle='rgba(255,255,255,.2)'; ctx.strokeRect(90,50,W-180,H-100);
+    ctx.fillStyle='#f8fafc'; ctx.font='bold 18px monospace'; ctx.fillText('MENÚ', 120, 82);
+
+    menu.tabs.forEach((t,i)=>{
+      ctx.fillStyle = i===menu.index ? '#facc15' : '#94a3b8';
+      ctx.fillText((i===menu.index?'▶ ':'  ') + t, 120, 122 + i*28);
+    });
+
+    const panelX = 320, panelY = 92;
+    ctx.fillStyle='#0f172a'; ctx.fillRect(panelX,panelY,W-450,H-180);
+    ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.strokeRect(panelX,panelY,W-450,H-180);
+    ctx.fillStyle='#fff'; ctx.font='14px monospace';
+
+    const tab = menu.tabs[menu.index];
+    if(tab==='Resumen'){
+      wrapText('Eres una/o Entrenador/a de Psicología Crítica. Debes ganar los gimnasios Contexto, Relacional y Comunidad antes de llegar a Kibby.', panelX+18,panelY+30,W-490,22);
+      ctx.fillText('Biografía leída: ' + (player.read.bio?'Sí':'No'), panelX+18, panelY+110);
+      ctx.fillText('Contexto leído: ' + (player.read.context?'Sí':'No'), panelX+18, panelY+136);
+      ctx.fillText('Reseña leída: ' + (player.read.review?'Sí':'No'), panelX+18, panelY+162);
+    } else if(tab==='Medallas'){
+      ctx.fillText('Contexto: ' + (player.gymCleared[0]?'Obtenida':'Pendiente'), panelX+18, panelY+36);
+      ctx.fillText('Relacional: ' + (player.gymCleared[1]?'Obtenida':'Pendiente'), panelX+18, panelY+66);
+      ctx.fillText('Comunidad: ' + (player.gymCleared[2]?'Obtenida':'Pendiente'), panelX+18, panelY+96);
+      ctx.fillText('Velocidad actual: ' + currentSpeed().toFixed(0), panelX+18, panelY+132);
+    } else if(tab==='Inventario'){
+      player.inventory.forEach((it, idx) => ctx.fillText('- ' + it, panelX+18, panelY+30 + idx*26));
+      ctx.fillText('- Medallas teóricas: ' + player.medals, panelX+18, panelY+120);
+    } else if(tab==='Ayuda'){
+      wrapText('Enter/Z = interactuar · X/M = menú · Debes responder bien TODAS las preguntas de cada combate para ganar. Ya no hay guardado automático.', panelX+18,panelY+30,W-490,22);
+      ctx.fillText('Reinicio manual: abre menú y entra en Reiniciar', panelX+18, panelY+120);
+    } else if(tab==='Reiniciar'){
+      wrapText('Presiona Enter / A aquí para borrar el guardado y reiniciar la partida desde el comienzo.', panelX+18,panelY+30,W-490,22);
+      ctx.fillText('Se eliminará el progreso guardado.', panelX+18, panelY+120);
+    }
+  }
+
+  function drawBattle(){
+    ctx.fillStyle='#dbeafe'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#bfdbfe'; ctx.fillRect(0,0,W,H/2);
+    ctx.fillStyle='#a7f3d0'; ctx.fillRect(0,H/2,W,H/2);
+    ctx.fillStyle='#86efac'; ctx.beginPath(); ctx.ellipse(230,340,150,38,0,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(720,180,150,38,0,0,Math.PI*2); ctx.fill();
+
+    drawEnemy(660,110,battle.trainer.includes('Kibby') ? '#a78bfa' : '#ef4444');
+    drawPlayerBack(170,250);
+
+    drawBattleBox(540,46,330,90,battle.trainer + ' / ' + (battle.trainer==='Kibby'?'Figura simbólica':'Rival teórico'), battle.enemyHP);
+    drawBattleBox(58,330,330,90,'Tú / Entrenador(a) Crítico(a)', battle.playerHP);
+
+    ctx.fillStyle='rgba(255,255,255,.98)'; ctx.fillRect(14,H-262,W-28,238);
+    ctx.strokeStyle='#0f172a'; ctx.lineWidth=4; ctx.strokeRect(14,H-262,W-28,238);
+    const qu = battle.questions[battle.qIndex];
+    ctx.fillStyle='#111827'; ctx.font='bold 14px monospace';
+    wrapText(qu.text, 30, H-226, W-60, 18, 4);
+
+    qu.options.forEach((op,i)=>{
+      const col = i%2, row = Math.floor(i/2);
+      const bx = 28 + col*452, by = H-150 + row*52;
+      ctx.fillStyle = i===battle.selected ? '#fde68a' : '#e2e8f0';
+      ctx.fillRect(bx,by,418,42);
+      ctx.strokeStyle='#334155'; ctx.strokeRect(bx,by,418,42);
+      ctx.fillStyle='#0f172a'; ctx.font='12px monospace';
+      wrapText((i+1)+'. '+op, bx+8, by+17, 400, 12, 2);
+    });
+
+    if(battle.feedback){
+      ctx.fillStyle='#7c2d12';
+      ctx.font='12px monospace';
+      wrapText(battle.feedback, 28, H-34, W-56, 13, 2);
+    }
+  }
+
+  function drawBattleBox(x,y,w,h,title,hp){
+    ctx.fillStyle='rgba(255,255,255,.96)'; ctx.fillRect(x,y,w,h);
+    ctx.strokeStyle='#0f172a'; ctx.lineWidth=4; ctx.strokeRect(x,y,w,h);
+    ctx.fillStyle='#111827'; ctx.font='bold 15px monospace'; ctx.fillText(title,x+16,y+24);
+    ctx.fillStyle='#334155'; ctx.fillText('HP',x+16,y+56);
+    ctx.fillStyle='#e5e7eb'; ctx.fillRect(x+56,y+44,w-80,16);
+    ctx.fillStyle = hp>50 ? '#22c55e' : hp>20 ? '#facc15' : '#ef4444';
+    ctx.fillRect(x+56,y+44,(w-80)*(hp/100),16);
+    ctx.strokeStyle='#334155'; ctx.strokeRect(x+56,y+44,w-80,16);
+  }
+
+  function drawEnemy(x,y,color){ drawPixelCharacter(x,y,color,'down',game.time*8,1.5); }
+  function drawPlayerBack(x,y){
+    ctx.save(); ctx.translate(x,y); ctx.scale(1.6,1.6);
+    ctx.fillStyle='rgba(0,0,0,.25)'; ctx.fillRect(6,26,18,4);
+    ctx.fillStyle='#3f2b1d'; ctx.fillRect(8,2,12,5);
+    ctx.fillStyle='#f4c29b'; ctx.fillRect(9,5,10,8);
+    ctx.fillStyle='#fde047'; ctx.fillRect(7,12,14,10);
+    ctx.fillStyle='#334155'; ctx.fillRect(9,12,10,10);
+    ctx.fillStyle='#f4c29b'; ctx.fillRect(5,13,2,8); ctx.fillRect(21,13,2,8);
+    ctx.fillStyle='#1e293b'; ctx.fillRect(9,22,4,8); ctx.fillRect(15,22,4,8);
+    ctx.restore();
+  }
+
+  function drawIntro(){
+    const grad = ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,'#0f172a'); grad.addColorStop(1,'#1e293b');
+    ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
+    for(let i=0;i<100;i++){
+      ctx.fillStyle='rgba(255,255,255,.15)'; ctx.fillRect((i*97)%W, (i*53 + (game.time*18|0))%H, 2, 2);
+    }
+    drawPixelCharacter(W/2-40,H/2-60,'#facc15','down',game.time*6,2.1);
+    ctx.fillStyle='#fff'; ctx.font='bold 30px monospace'; ctx.fillText('EL DISCURSO DEL DÉFICIT', 180, 120);
+    ctx.font='bold 22px monospace'; ctx.fillStyle='#cbd5e1'; ctx.fillText('RPG CRÍTICO DE KENNETH GERGEN', 190, 156);
+    ctx.fillStyle='#fde047'; ctx.font='16px monospace';
+    wrapText('Biografía, contexto histórico y reseña crítica del capítulo convertidos en una aventura estilo Pokémon.', 118, 226, 720, 26);
+    ctx.fillStyle='#fff'; ctx.fillText('Pulsa Enter / A para comenzar', 310, 458);
+  }
+
+  function drawFinal(){
+    const good = player.finalChoice === 'good';
+    ctx.fillStyle = good ? '#052e16' : '#450a0a'; ctx.fillRect(0,0,W,H);
+    for(let i=0;i<80;i++){
+      ctx.fillStyle=good?'rgba(255,255,255,.12)':'rgba(255,180,180,.08)';
+      ctx.fillRect((i*73)%W, (i*91)%H, 3, 3);
+    }
+    drawPixelCharacter(W/2-160,H/2-10,'#fde047','down',game.time*8,1.6);
+    drawPixelCharacter(W/2+70,H/2-10,good?'#a78bfa':'#ef4444','down',game.time*8,1.6);
+    ctx.fillStyle='#fff'; ctx.font='bold 28px monospace';
+    ctx.fillText(good ? 'VICTORIA: COMUNIDAD RECUPERADA' : 'GAME OVER: LA CULTURA HA MUERTO', 120, 130);
+    ctx.font='16px monospace';
+    const text = good
+      ? 'Entendiste que el problema no era Kibby como esencia individual, sino el modo en que la cultura lo nombraba, separaba y despojaba de comunidad.'
+      : 'Al etiquetar a Kibby como una esencia aislada, repetiste el discurso del déficit y cerraste la posibilidad de un vínculo relacional.';
+    wrapText(text, 110, 190, 740, 28);
+    ctx.fillText('Pulsa Enter / A para reiniciar', 300, 420);
+  }
+
+
+
+  function handleBattlePointer(clientX, clientY){
+    if(game.state !== STATE.BATALLA || battle.ended) return;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = W / rect.width;
+    const scaleY = H / rect.height;
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
+
+    for(let i=0; i<4; i++){
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const bx = 28 + col * 452;
+      const by = H - 150 + row * 52;
+      const bw = 418;
+      const bh = 42;
+      if(x >= bx && x <= bx + bw && y >= by && y <= by + bh){
+        battle.selected = i;
+        resolveAnswer(i);
+        return;
+      }
+    }
+  }
+
+  function render(){
+    const sx = game.shake>0 ? (Math.random()-0.5)*game.shake : 0;
+    const sy = game.shake>0 ? (Math.random()-0.5)*game.shake : 0;
+    ctx.save(); ctx.translate(sx,sy);
+    if(game.state === STATE.INTRO) drawIntro();
+    else if(game.state === STATE.EXPLORACION){ drawWorld(); drawHUD(); }
+    else if(game.state === STATE.INTERIOR){ drawInterior(); drawHUD(); }
+    else if(game.state === STATE.DIALOGO){
+      if(game.prevState === STATE.INTERIOR) drawInterior(); else drawWorld();
+      drawHUD(); drawDialogBox();
+    }
+    else if(game.state === STATE.MENU){ if(currentInterior) drawInterior(); else drawWorld(); drawHUD(); drawMenu(); }
+    else if(game.state === STATE.BATALLA){ drawBattle(); }
+    else if(game.state === STATE.FINAL){ drawFinal(); }
+    else if(game.state === STATE.TRANSICION){ if(currentInterior) drawInterior(); else drawWorld(); drawHUD(); ctx.fillStyle='rgba(255,255,255,.6)'; ctx.fillRect(0,0,W,H); }
+    ctx.restore();
+
+    if(game.flash > 0){ ctx.fillStyle='rgba(255,255,255,.25)'; ctx.fillRect(0,0,W,H); }
+  }
+
+  // INPUT
+  function onKeyDown(e){
+    const code = e.code;
+    if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','Enter'].includes(code)) e.preventDefault();
+    if(!input.held.has(code)) input.pressed.add(code);
+    input.held.add(code);
+  }
+  function onKeyUp(e){ input.held.delete(e.code); }
+  window.addEventListener('keydown', onKeyDown, {passive:false});
+  window.addEventListener('keyup', onKeyUp);
+
+  // touch
+  document.querySelectorAll('[data-key]').forEach(btn => {
+    const code = btn.dataset.key;
+    const down = (e) => { e.preventDefault(); if(!input.held.has(code)) input.pressed.add(code); input.held.add(code); };
+    const up = (e) => { e.preventDefault(); input.held.delete(code); };
+    btn.addEventListener('touchstart', down, {passive:false});
+    btn.addEventListener('touchend', up, {passive:false});
+    btn.addEventListener('touchcancel', up, {passive:false});
+    btn.addEventListener('mousedown', down);
+    btn.addEventListener('mouseup', up);
+    btn.addEventListener('mouseleave', up);
+  });
+
+
+
+  canvas.addEventListener('touchstart', (e) => {
+    if(game.state !== STATE.BATALLA) return;
+    const touch = e.changedTouches && e.changedTouches[0];
+    if(!touch) return;
+    e.preventDefault();
+    handleBattlePointer(touch.clientX, touch.clientY);
+  }, {passive:false});
+
+  canvas.addEventListener('mousedown', (e) => {
+    if(game.state !== STATE.BATALLA) return;
+    handleBattlePointer(e.clientX, e.clientY);
+  });
+
+  // init
+  worldBuild();
+  shuffleAllBattleQuestions();
+
+  let last = performance.now();
+  function loop(now){
+    const dt = Math.min(0.033, (now-last)/1000);
+    last = now;
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
